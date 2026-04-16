@@ -1,2 +1,2 @@
 # SPACE-SHOOTER
-NOTHING
+A 2d space shooting game
