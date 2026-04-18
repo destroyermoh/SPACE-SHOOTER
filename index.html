@@ -632,65 +632,259 @@ function drawPlayer() {
   const p = player;
   if (invincible && Math.floor(frameCount / 4) % 2 === 0) return;
 
-  p.thrusterAnim = (p.thrusterAnim + 0.3) % (Math.PI * 2);
-  const thrSize = 12 + 6 * Math.sin(p.thrusterAnim);
+  p.thrusterAnim = (p.thrusterAnim + 0.04) % (Math.PI * 2);
 
-  const tg1 = ctx.createRadialGradient(p.x - 10, p.y + p.h / 2 + thrSize / 2, 0, p.x - 10, p.y + p.h / 2, thrSize);
-  tg1.addColorStop(0, '#fff'); tg1.addColorStop(0.3, '#0ff'); tg1.addColorStop(1, 'transparent');
-  ctx.fillStyle = tg1;
-  ctx.beginPath();
-  ctx.ellipse(p.x - 10, p.y + p.h / 2 + thrSize * 0.4, 5, thrSize, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const tg2 = ctx.createRadialGradient(p.x + 10, p.y + p.h / 2 + thrSize / 2, 0, p.x + 10, p.y + p.h / 2, thrSize);
-  tg2.addColorStop(0, '#fff'); tg2.addColorStop(0.3, '#0ff'); tg2.addColorStop(1, 'transparent');
-  ctx.fillStyle = tg2;
-  ctx.beginPath();
-  ctx.ellipse(p.x + 10, p.y + p.h / 2 + thrSize * 0.4, 5, thrSize, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // --- Trail / Motion blur streaks -------------------------------------------
+  if (!p.trail) p.trail = [];
+  p.trail.unshift({ x: p.x, y: p.y, a: 0.38 });
+  if (p.trail.length > 10) p.trail.pop();
+  p.trail.forEach((t, i) => {
+    t.a *= 0.78;
+    ctx.save();
+    ctx.globalAlpha = t.a * (1 - i / 10);
+    ctx.translate(t.x, t.y);
+    // Draw a tiny ghost disc for the trail
+    const tw = 52 * (1 - i * 0.07);
+    const th = 8 * (1 - i * 0.07);
+    const tGrad = ctx.createLinearGradient(0, -th, 0, th);
+    tGrad.addColorStop(0, '#f80');
+    tGrad.addColorStop(1, '#f800');
+    ctx.fillStyle = tGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 5, tw, th, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
 
   ctx.save();
   ctx.translate(p.x, p.y);
-  ctx.shadowBlur = 15;
-  ctx.shadowColor = p.shield ? '#0ff' : '#08f';
 
-  ctx.fillStyle = p.shield ? '#0ff' : '#48f';
+  const ac = frameCount; // alias
+  const sc = p.shield ? '#0ff' : '#ff8800';  // accent color
+  const sc2 = p.shield ? '#00ffff' : '#ffaa00';
+  const pulse = 0.7 + 0.3 * Math.sin(ac * 0.08);
+  const hover = Math.sin(ac * 0.05) * 2; // gentle vertical bob
+
+  // ── 1. OUTER AMBIENT GLOW beneath disc ──────────────────────────────────
+  const ambR = 55 + 8 * pulse;
+  const amb = ctx.createRadialGradient(0, 6 + hover, 0, 0, 6 + hover, ambR);
+  amb.addColorStop(0, p.shield ? 'rgba(0,255,255,0.22)' : 'rgba(255,140,0,0.22)');
+  amb.addColorStop(0.5, p.shield ? 'rgba(0,255,255,0.06)' : 'rgba(255,100,0,0.06)');
+  amb.addColorStop(1, 'transparent');
+  ctx.fillStyle = amb;
   ctx.beginPath();
-  ctx.moveTo(0, -p.h / 2);
-  ctx.lineTo(-12, p.h / 4);
-  ctx.lineTo(-p.w / 2, p.h / 2);
-  ctx.lineTo(-10, p.h / 4);
-  ctx.lineTo(0, p.h / 3);
-  ctx.lineTo(10, p.h / 4);
-  ctx.lineTo(p.w / 2, p.h / 2);
-  ctx.lineTo(12, p.h / 4);
+  ctx.ellipse(0, 6 + hover, ambR, ambR * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── 2. TRACTOR BEAM (animated cone downward) ────────────────────────────
+  const beamPulse = 0.4 + 0.35 * Math.abs(Math.sin(ac * 0.06));
+  const beamGrad = ctx.createLinearGradient(0, 10 + hover, 0, 50 + hover);
+  beamGrad.addColorStop(0, p.shield ? `rgba(0,255,255,${beamPulse})` : `rgba(255,170,0,${beamPulse})`);
+  beamGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = beamGrad;
+  ctx.beginPath();
+  ctx.moveTo(-12, 10 + hover);
+  ctx.lineTo(12, 10 + hover);
+  ctx.lineTo(26, 50 + hover);
+  ctx.lineTo(-26, 50 + hover);
   ctx.closePath();
   ctx.fill();
+  // Beam rings animating downward
+  for (let r = 0; r < 3; r++) {
+    const ry = 18 + hover + ((ac * 1.2 + r * 14) % 32);
+    const rw = 12 + (ry - 18) * 0.55;
+    const ra = 0.5 - (ry - 18) / 40;
+    if (ra <= 0) continue;
+    ctx.strokeStyle = p.shield ? `rgba(0,255,255,${ra})` : `rgba(255,200,50,${ra})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(0, ry, rw, rw * 0.22, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
-  ctx.fillStyle = '#fff4';
+  // ── 3. LOWER HULL RING (under-disc bulge) ───────────────────────────────
+  const lowY = 6 + hover;
+  const lowW = 46, lowH = 9;
+  const lowGrad = ctx.createLinearGradient(0, lowY - lowH, 0, lowY + lowH);
+  lowGrad.addColorStop(0, '#6a7080');
+  lowGrad.addColorStop(0.5, '#3a3f50');
+  lowGrad.addColorStop(1, '#252830');
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = sc;
+  ctx.fillStyle = lowGrad;
   ctx.beginPath();
-  ctx.moveTo(0, -p.h / 2 + 4);
-  ctx.lineTo(-5, p.h / 4);
-  ctx.lineTo(0, p.h / 3 - 4);
-  ctx.lineTo(5, p.h / 4);
-  ctx.closePath();
+  ctx.ellipse(0, lowY, lowW, lowH, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // ── 4. MAIN DISC BODY ───────────────────────────────────────────────────
+  const discW = 56, discH = 13;
+  const discY = -1 + hover;
+  const discGrad = ctx.createLinearGradient(0, discY - discH, 0, discY + discH * 1.5);
+  discGrad.addColorStop(0,   '#e8edf5');
+  discGrad.addColorStop(0.3, '#c8cdd8');
+  discGrad.addColorStop(0.55,'#9098aa');
+  discGrad.addColorStop(0.8, '#6a7080');
+  discGrad.addColorStop(1,   '#454a58');
+  ctx.shadowBlur = 16;
+  ctx.shadowColor = p.shield ? '#0ff3' : '#0006';
+  ctx.fillStyle = discGrad;
+  ctx.beginPath();
+  ctx.ellipse(0, discY, discW, discH, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const cockpitGrad = ctx.createRadialGradient(0, -p.h / 4, 1, 0, -p.h / 4, 10);
-  cockpitGrad.addColorStop(0, '#fff'); cockpitGrad.addColorStop(0.5, '#0ff'); cockpitGrad.addColorStop(1, '#00f8');
-  ctx.fillStyle = cockpitGrad;
+  // Disc panel lines (decorative)
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(80,90,110,0.55)';
+  ctx.lineWidth = 0.8;
+  [-20, 0, 20].forEach(px => {
+    ctx.beginPath();
+    ctx.moveTo(px, discY - discH * 0.5);
+    ctx.lineTo(px, discY + discH * 0.5);
+    ctx.stroke();
+  });
+
+  // Disc top highlight
+  const hiGrad = ctx.createLinearGradient(0, discY - discH, 0, discY);
+  hiGrad.addColorStop(0, 'rgba(255,255,255,0.28)');
+  hiGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = hiGrad;
   ctx.beginPath();
-  ctx.ellipse(0, -p.h / 4, 7, 9, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, discY - discH * 0.25, discW * 0.78, discH * 0.55, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = '#8cf'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(-12, p.h / 4); ctx.lineTo(-p.w / 2 + 4, p.h / 2 - 4); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(12, p.h / 4); ctx.lineTo(p.w / 2 - 4, p.h / 2 - 4); ctx.stroke();
+  // ── 5. ANIMATED ORANGE LIGHT RING ───────────────────────────────────────
+  const ringY = discY + 1;
+  const ringRot = ac * 0.055; // ring spins
+  const nLights = 12;
+  for (let i = 0; i < nLights; i++) {
+    const angle = (i / nLights) * Math.PI * 2 + ringRot;
+    const lx = Math.cos(angle) * (discW - 10);
+    const ly = ringY + Math.sin(angle) * (discH - 2) * 0.65;
+    const depth = Math.sin(angle); // -1 back, +1 front
+    if (depth < -0.1) continue; // hide "back" lights
+    const brightness = 0.5 + 0.5 * depth;
+    const lSize = 3 + depth * 2;
 
+    ctx.shadowBlur = 10 * brightness;
+    ctx.shadowColor = sc;
+    const lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, lSize + 1);
+    // Alternate color for every 3rd light when rapid fire
+    const lightCol = (p.rapidFire && i % 3 === 0)
+      ? `hsla(${(ac * 8 + i * 30) % 360},100%,70%,${brightness})`
+      : (p.shield ? `rgba(0,255,255,${brightness})` : `rgba(255,${160 + i * 5},0,${brightness})`);
+    lg.addColorStop(0, lightCol);
+    lg.addColorStop(1, 'transparent');
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.arc(lx, ly, lSize + 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
+  // ── 6. ORANGE STRIPE / BAND around disc rim ─────────────────────────────
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = sc;
+  ctx.strokeStyle = p.shield
+    ? `rgba(0,255,255,${0.6 + 0.4 * pulse})`
+    : `rgba(255,${120 + 60 * pulse | 0},0,${0.7 + 0.3 * pulse})`;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.ellipse(0, ringY, discW - 8, (discH - 2) * 0.7, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // ── 7. DOME (cockpit) ────────────────────────────────────────────────────
+  const domeBaseY = discY - discH + 2 + hover;
+  const domeW = 22, domeH = 18;
+
+  // Dome glass outer fill
+  const domeGrad = ctx.createRadialGradient(-5, domeBaseY - domeH * 0.6, 1, 0, domeBaseY - domeH * 0.2, domeH * 1.1);
+  domeGrad.addColorStop(0, p.shield ? '#aef' : '#cce8ff');
+  domeGrad.addColorStop(0.45, p.shield ? '#08a' : '#3366aa');
+  domeGrad.addColorStop(1, '#0a0e1a');
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = p.shield ? '#0ff' : '#224488';
+  ctx.fillStyle = domeGrad;
+  ctx.save();
+  ctx.beginPath();
+  // Clip to top half (dome shape)
+  ctx.ellipse(0, domeBaseY, domeW, domeH, 0, Math.PI, Math.PI * 2);
+  ctx.clip();
+  ctx.fillRect(-domeW, domeBaseY - domeH, domeW * 2, domeH);
+  ctx.restore();
+
+  // Dome outline
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = p.shield ? '#0ff' : '#4488cc';
+  ctx.strokeStyle = p.shield ? '#0ffa' : 'rgba(100,160,220,0.7)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.ellipse(0, domeBaseY, domeW, domeH, 0, Math.PI, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Dome gloss highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(-6, domeBaseY - domeH * 0.55, 8, 5, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Alien eye glow inside dome
+  const eyeGlow = ctx.createRadialGradient(0, domeBaseY - domeH * 0.4, 0, 0, domeBaseY - domeH * 0.4, 8);
+  eyeGlow.addColorStop(0, p.shield ? 'rgba(0,255,200,0.5)' : 'rgba(50,200,255,0.4)');
+  eyeGlow.addColorStop(1, 'transparent');
+  ctx.fillStyle = eyeGlow;
+  ctx.beginPath();
+  ctx.arc(0, domeBaseY - domeH * 0.4, 8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── 8. RAPID FIRE: spinning energy rings ────────────────────────────────
   if (p.rapidFire) {
-    ctx.strokeStyle = `hsl(${frameCount * 10}, 100%, 70%)`;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(-p.w / 2 - 2, -p.h / 2 - 2, p.w + 4, p.h + 4);
+    for (let ri = 0; ri < 2; ri++) {
+      const ringAngle = ac * (0.08 + ri * 0.05) + ri * Math.PI * 0.5;
+      ctx.save();
+      ctx.rotate(ringAngle);
+      ctx.strokeStyle = `hsla(${(ac * 6 + ri * 120) % 360},100%,65%,0.8)`;
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = `hsl(${(ac * 6 + ri * 120) % 360},100%,65%)`;
+      ctx.beginPath();
+      ctx.ellipse(0, discY, discW + 8 + ri * 4, (discH + 4) * (0.4 + ri * 0.15), 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ── 9. SHIELD BUBBLE ────────────────────────────────────────────────────
+  if (p.shield) {
+    const shieldR = 44 + 4 * pulse;
+    const shieldGrad = ctx.createRadialGradient(0, 0, shieldR * 0.6, 0, 0, shieldR);
+    shieldGrad.addColorStop(0, 'transparent');
+    shieldGrad.addColorStop(0.75, 'rgba(0,255,255,0.04)');
+    shieldGrad.addColorStop(1,  'rgba(0,255,255,0.22)');
+    ctx.fillStyle = shieldGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, shieldR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#0ff';
+    ctx.strokeStyle = `rgba(0,255,255,${0.4 + 0.3 * pulse})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, shieldR, 0, Math.PI * 2);
+    ctx.stroke();
+    // Hex pattern on shield
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(0,255,255,0.08)';
+    ctx.lineWidth = 0.6;
+    for (let hi = 0; hi < 6; hi++) {
+      const ha = hi / 6 * Math.PI * 2 + ac * 0.01;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(ha) * shieldR, Math.sin(ha) * shieldR);
+      ctx.stroke();
+    }
   }
 
   ctx.shadowBlur = 0;
